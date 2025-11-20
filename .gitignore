@@ -1,0 +1,25 @@
+# --- Python Internal Files (Do not upload) ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Virtual Environments (Do not upload) ---
+# These are huge and can be recreated using requirements.txt
+env/
+venv/
+.venv/
+
+# --- IDE/Editor Settings (Personal preferences) ---
+.vscode/
+.idea/
+*.swp
+
+# --- System Files ---
+.DS_Store
+Thumbs.db
+
+# --- Large Data Files (Optional) ---
+# IMPORTANT: GitHub blocks files larger than 100MB.
+# If your .pkcls file is >100MB, uncomment the line below to ignore it.
+# *.pkcls

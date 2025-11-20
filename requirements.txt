@@ -1,0 +1,5 @@
+Flask
+orange3
+numpy
+scipy
+scikit-learn
