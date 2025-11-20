@@ -1,7 +1,8 @@
 Flask
+gunicorn
 orange3
 numpy
 scipy
 scikit-learn
 pandas
-gunicorn
+PyQt5
