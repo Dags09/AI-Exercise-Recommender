@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Exercise Recommender</title>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Small tweak for the results header */
+        .results-header {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
 </head>
 <body>
 
@@ -72,109 +84,35 @@
     <div id="results-wrapper" style="display:none; margin-top:30px;">
         
         <div class="results-header">
-            <h3 style="margin:0;">Found <span id="result-count">0</span> exercises</h3>
-            
-            <div class="sort-control">
-                <label for="sort-order" style="display:inline; margin-right:10px;">Sort by Rating:</label>
-                <select id="sort-order">
-                    <option value="desc">Highest First ⬇</option>
-                    <option value="asc">Lowest First ⬆</option>
-                </select>
-            </div>
+            Found <span id="result-count">0</span> exercises matching your criteria.
         </div>
 
         <div id="results-list"></div>
     </div>
 
     <script>
-        // Global variable to store the current search results
-        let currentExercises = [];
-
-        // Helper to convert rating strings (e.g. "8.5", "8.25 - 8.45", "N/A") into sortable numbers
-        function parseRating(ratingStr) {
-            if (!ratingStr || ratingStr === "N/A" || ratingStr === "Unknown") return -1;
-            
-            // Handle ranges like "8.25 - 8.45" by taking the average
-            if (ratingStr.includes("-")) {
-                const parts = ratingStr.split("-");
-                const num1 = parseFloat(parts[0]);
-                const num2 = parseFloat(parts[1]);
-                return (num1 + num2) / 2;
-            }
-            
-            return parseFloat(ratingStr) || -1;
-        }
-
-        // Function to render the list based on the current sort order
-        function renderList() {
-            const listContainer = document.getElementById('results-list');
-            const sortOrder = document.getElementById('sort-order').value;
-
-            // Sort the data
-            currentExercises.sort((a, b) => {
-                const valA = parseRating(String(a.Rating));
-                const valB = parseRating(String(b.Rating));
-
-                if (sortOrder === 'asc') {
-                    return valA - valB;
-                } else {
-                    return valB - valA;
-                }
-            });
-
-            // Clear and rebuild HTML
-            listContainer.innerHTML = "";
-            
-            if (currentExercises.length > 0) {
-                currentExercises.forEach(ex => {
-                    const cardHTML = `
-                        <div class="card" style="margin-bottom: 20px;">
-                            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
-                                <div class="meta-title" style="margin:0; font-size:1.3em;">${ex.Title}</div>
-                                <div style="background:white; color:#28a745; padding:5px 10px; border-radius:5px; font-weight:bold;">
-                                    ${ex.Rating} / 10
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <div class="meta-item">
-                                    <span class="label-tag">Equipment:</span>
-                                    <span>${ex.Equipment}</span>
-                                </div>
-                                <div class="meta-item">
-                                    <span class="label-tag">Description:</span>
-                                    <span>${ex.Description}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    listContainer.innerHTML += cardHTML;
-                });
-            } else {
-                listContainer.innerHTML = "<p style='text-align:center; margin-top:20px;'>No exercises found.</p>";
-            }
-        }
-
-        // Event Listener for Sort Dropdown
-        document.getElementById('sort-order').addEventListener('change', renderList);
-
-        // Main Form Submit Handler
         document.getElementById('prediction-form').addEventListener('submit', async function(e) {
             e.preventDefault(); 
 
             const wrapper = document.getElementById('results-wrapper');
+            const listContainer = document.getElementById('results-list');
             const btn = document.querySelector('button');
             
+            // UI Feedback
             btn.innerText = "AI is analyzing...";
             wrapper.style.display = 'none';
+            listContainer.innerHTML = "";
 
+            // Gather Data
             const payload = {
                 'Level': document.getElementById('level').value,
                 'BodyPart': document.getElementById('bodypart').value,
                 'Type': document.getElementById('type').value,
-                'Equipment': document.getElementById('equipment').value
+                'Equipment': document.getElementById('equipment').value // Sends "" if "Any" is selected
             };
 
             try {
+                // Send to Python
                 const response = await fetch('/predict', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -184,14 +122,43 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Store results globally so we can sort them later
-                    currentExercises = data.exercises || [];
-                    
+                    // Update Count
                     document.getElementById('result-count').innerText = data.count;
                     wrapper.style.display = 'block';
-                    
-                    // Initial Render
-                    renderList();
+
+                    // Generate Cards
+                    if (data.exercises && data.exercises.length > 0) {
+                        data.exercises.forEach(ex => {
+                            
+                            // Color code the rating slightly for better UX
+                            let ratingColor = "#28a745"; // Green
+                            if(ex.Rating === "N/A" || ex.Rating === "Unknown") ratingColor = "#6c757d"; // Grey
+
+                            const cardHTML = `
+                                <div class="card" style="margin-bottom: 20px;">
+                                    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                                        <div class="meta-title" style="margin:0; font-size:1.2em;">${ex.Title}</div>
+                                        <div style="background:white; color:${ratingColor}; padding:5px 10px; border-radius:5px; font-weight:bold; min-width:60px; text-align:center;">
+                                            ${ex.Rating}
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="meta-item">
+                                            <span class="label-tag">Equipment:</span>
+                                            <span>${ex.Equipment}</span>
+                                        </div>
+                                        <div class="meta-item">
+                                            <span class="label-tag">Description:</span>
+                                            <span>${ex.Description}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            listContainer.innerHTML += cardHTML;
+                        });
+                    } else {
+                        listContainer.innerHTML = "<p style='text-align:center; margin-top:20px; color:#777;'>No exercises found. Try changing the filters or selecting 'Any Equipment'.</p>";
+                    }
 
                 } else {
                     alert("Error: " + data.error);

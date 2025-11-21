@@ -1,41 +1,49 @@
 import pickle
 from flask import Flask, request, jsonify, render_template
 import Orange
+import pandas as pd
 import numpy as np
 import os
 import traceback
 import random
 
-# --- STANDARD FLASK SETUP ---
 app = Flask(__name__)
 
 # --- PATH CONFIGURATION ---
-# Get the folder where app.py is located
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Define paths to your model folder
 MODEL_FILE = os.path.join(BASE_DIR, "model", "Final_Project.pkcls")
 DATA_FILE = os.path.join(BASE_DIR, "model", "data.csv")
 
 model = None
-data_table = None
+data_df = None
 
+# --- 1. Load Model (Orange) ---
 if os.path.exists(MODEL_FILE):
     try:
         model = pickle.load(open(MODEL_FILE, "rb"))
-        print("✅ Model loaded successfully.")
+        print(f"✅ Model loaded successfully from: {MODEL_FILE}")
     except Exception as e:
         print(f"❌ Error loading model: {e}")
+else:
+    print(f"❌ Error: Model file missing at {MODEL_FILE}")
 
+# --- 2. Load Data (Pandas) ---
 if os.path.exists(DATA_FILE):
     try:
-        # Load data using Orange
-        data_table = Orange.data.Table(DATA_FILE)
-        print(f"✅ Training Data loaded from {DATA_FILE} ({len(data_table)} rows)")
+        # Read CSV as Strings to preserve formatting
+        df = pd.read_csv(DATA_FILE, dtype=str)
+        # If using raw dataset, we don't need to skip rows. 
+        data_df = df
+        
+        # Clean column names
+        data_df.columns = data_df.columns.str.strip()
+        
+        print(f"✅ Data loaded via Pandas: {len(data_df)} exercises")
     except Exception as e:
-        print(f"❌ Error loading CSV data: {e}")
+        print(f"❌ Error loading CSV with Pandas: {e}")
 else:
-    print(f"⚠️ WARNING: {DATA_FILE} not found.")
+    print(f"⚠️ Warning: Data file missing at {DATA_FILE}")
+
 
 @app.route('/')
 def home():
@@ -52,89 +60,80 @@ def predict():
         
         found_exercises = []
         
-        if data_table:
+        # --- SEARCH & PREDICT ---
+        if data_df is not None:
             try:
-                # Find rows that match user input
-                matches = []
-                for row in data_table:
-                    r_level = str(row["Level"])
-                    r_body = str(row["BodyPart"])
-                    r_type = str(row["Type"])
+                # 1. Filter DataFrame (Database Search)
+                # We use .copy() to work with a clean subset of data
+                matches = data_df[
+                    (data_df['Level'] == data.get('Level')) &
+                    (data_df['BodyPart'] == data.get('BodyPart')) &
+                    (data_df['Type'] == data.get('Type'))
+                ].copy()
 
-                    # Basic Filtering
-                    if (r_level == data.get('Level') and 
-                        r_body == data.get('BodyPart') and 
-                        r_type == data.get('Type')):
-                        
-                        # Equipment Filtering (Optional)
-                        user_equip = data.get('Equipment')
-                        r_equip = str(row["Equipment"])
-                        if user_equip and user_equip != "" and user_equip != r_equip:
-                            continue 
-                        
-                        matches.append(row)
+                # Optional Equipment Filter
+                user_equip = data.get('Equipment')
+                if user_equip and user_equip != "":
+                    matches = matches[matches['Equipment'] == user_equip]
 
-                # --- PROCESS EACH MATCH ---
-                for row in matches:
-                    title = str(row["Title"])
-                    equip = str(row["Equipment"])
+                # 2. Process Matches (Row by Row)
+                for _, row in matches.iterrows():
                     
-                    # 1. Get Description
-                    desc = "None"
-                    try:
-                        desc = str(row["New Desc"])
-                    except:
-                        try:
-                            desc = str(row["Desc"])
-                        except:
-                            desc = "Description not available."
-                    if desc.strip() == "" or desc.lower() == "nan": 
-                        desc = "None"
+                    # --- Extract Text Details ---
+                    title = str(row.get("Title", "Unknown Title"))
+                    equip = str(row.get("Equipment", "-"))
+                    
+                    # Handle Description (Check 'New Desc' then 'Desc')
+                    desc = str(row.get("New Desc", ""))
+                    if desc == "" or desc.lower() == "nan":
+                        desc = str(row.get("Desc", "Description not available."))
+                    if desc.lower() == "nan": desc = "-"
 
-                    # 2. GET RATING (The Fix)
-                    # First, try to read the ACTUAL rating from the CSV
+                    # --- DETERMINE RATING ---
                     final_rating = "N/A"
-                    try:
-                        actual_rating = str(row["Rating"])
-                        # Only use it if it's valid (not missing, not '?')
-                        if actual_rating and actual_rating != "?" and actual_rating.lower() != "nan":
-                            final_rating = actual_rating
-                    except:
-                        pass
                     
-                    # 3. IF NO ACTUAL RATING, USE AI PREDICTION
-                    if final_rating == "N/A" or final_rating == "?":
+                    # Priority A: Check Real Data in CSV
+                    real_rating = str(row.get("Rating", "nan"))
+                    
+                    if real_rating.lower() not in ["nan", "n/a", "?", ""]:
+                        final_rating = real_rating
+                    else:
+                        # Priority B: Use AI Prediction (If data is missing)
                         try:
-                            # Build Input Vector for this specific row
+                            # Build Vector from THIS SPECIFIC ROW'S DATA
                             input_vector = [0] * len(domain.attributes)
+                            
                             for i, attr in enumerate(domain.attributes):
                                 attr_name = attr.name
+                                
+                                # Handle One-Hot Attributes (e.g. Equipment=Dumbbell)
                                 if "=" in attr_name:
-                                    feature_name, feature_value = attr_name.split("=", 1)
-                                    # Check the ROW data, not the user input
-                                    row_val = str(row[feature_name]) if feature_name in row.domain else None
-                                    if row_val == feature_value:
+                                    fname, fval = attr_name.split("=", 1)
+                                    # Check if the ROW has this specific value
+                                    # This ensures 'Equipment' is correctly passed to the AI
+                                    if str(row.get(fname)) == fval:
                                         input_vector[i] = 1
+                                # Handle Numeric Attributes
                                 else:
                                     try:
-                                        input_vector[i] = float(row[attr_name])
+                                        input_vector[i] = float(row.get(attr_name, 0))
                                     except:
                                         pass
                             
-                            # Add placeholders
+                            # Add placeholders for Target/Metas
                             input_vector.extend([Orange.data.Unknown] * len(domain.class_vars))
                             if hasattr(domain, 'metas'):
                                 input_vector.extend([Orange.data.Unknown] * len(domain.metas))
-                            
+
                             # Predict
                             instance = Orange.data.Instance(domain, input_vector)
                             pred_idx = model(instance)
                             idx = int(pred_idx[0]) if isinstance(pred_idx, np.ndarray) else int(pred_idx)
-                            final_rating = domain.class_var.values[idx] + " (Predicted)"
-                        except:
-                            final_rating = "Unknown"
+                            final_rating = f"{domain.class_var.values[idx]} (AI Predicted)"
+                        except Exception as ai_error:
+                            print(f"AI Prediction failed for {title}: {ai_error}")
+                            final_rating = "N/A"
 
-                    # Add to results
                     found_exercises.append({
                         "Title": title,
                         "Equipment": equip,
@@ -143,7 +142,7 @@ def predict():
                     })
 
             except Exception as e:
-                print(f"⚠️ Error searching: {e}")
+                print(f"⚠️ Error processing matches: {e}")
                 traceback.print_exc()
 
         return jsonify({
@@ -157,4 +156,5 @@ def predict():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
