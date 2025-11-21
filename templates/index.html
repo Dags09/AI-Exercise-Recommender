@@ -6,15 +6,21 @@
     <title>Exercise Recommender</title>
     <link rel="stylesheet" href="/static/style.css">
     <style>
-        /* Small tweak for the results header */
         .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             background: #e9ecef;
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 20px;
-            text-align: center;
-            font-weight: bold;
             color: #333;
+        }
+        .sort-control select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -84,35 +90,114 @@
     <div id="results-wrapper" style="display:none; margin-top:30px;">
         
         <div class="results-header">
-            Found <span id="result-count">0</span> exercises matching your criteria.
+            <div>Found <span id="result-count">0</span> exercises.</div>
+            
+            <div class="sort-control">
+                <label for="sort-order" style="margin-right:5px;">Sort by Rating:</label>
+                <select id="sort-order">
+                    <option value="desc">Highest First ⬇</option>
+                    <option value="asc">Lowest First ⬆</option>
+                </select>
+            </div>
         </div>
 
         <div id="results-list"></div>
     </div>
 
     <script>
+        let currentExercises = [];
+
+        // Helper to convert diverse ratings into numbers for sorting
+        function getRatingValue(ratingStr) {
+            if (!ratingStr) return -1;
+            const r = String(ratingStr).toLowerCase();
+
+            // 1. Handle ranges like "8.5 - 9.0"
+            if (r.includes("-")) {
+                const parts = r.split("-");
+                return (parseFloat(parts[0]) + parseFloat(parts[1])) / 2;
+            }
+            
+            // 2. Handle text labels (if your data uses these)
+            if (r === "great") return 9;
+            if (r === "good") return 7;
+            if (r === "average") return 5;
+            if (r === "bad") return 2;
+
+            // 3. Handle standard numbers
+            const val = parseFloat(r);
+            return isNaN(val) ? -1 : val;
+        }
+
+        function renderList() {
+            const listContainer = document.getElementById('results-list');
+            const sortOrder = document.getElementById('sort-order').value;
+
+            // Sort Logic
+            currentExercises.sort((a, b) => {
+                const valA = getRatingValue(a.Rating);
+                const valB = getRatingValue(b.Rating);
+
+                if (sortOrder === 'asc') {
+                    return valA - valB;
+                } else {
+                    return valB - valA;
+                }
+            });
+
+            // Render
+            listContainer.innerHTML = "";
+            if (currentExercises.length > 0) {
+                currentExercises.forEach(ex => {
+                    let ratingColor = "#28a745"; // Green
+                    if(ex.Rating === "N/A" || ex.Rating === "Unknown") ratingColor = "#6c757d"; 
+
+                    const cardHTML = `
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                                <div class="meta-title" style="margin:0; font-size:1.2em;">${ex.Title}</div>
+                                <div style="background:white; color:${ratingColor}; padding:5px 10px; border-radius:5px; font-weight:bold; min-width:60px; text-align:center;">
+                                    ${ex.Rating}
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="meta-item">
+                                    <span class="label-tag">Equipment:</span>
+                                    <span>${ex.Equipment}</span>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="label-tag">Description:</span>
+                                    <span>${ex.Description}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    listContainer.innerHTML += cardHTML;
+                });
+            } else {
+                listContainer.innerHTML = "<p style='text-align:center; margin-top:20px;'>No exercises found.</p>";
+            }
+        }
+
+        document.getElementById('sort-order').addEventListener('change', renderList);
+
         document.getElementById('prediction-form').addEventListener('submit', async function(e) {
             e.preventDefault(); 
 
             const wrapper = document.getElementById('results-wrapper');
-            const listContainer = document.getElementById('results-list');
             const btn = document.querySelector('button');
             
-            // UI Feedback
             btn.innerText = "AI is analyzing...";
             wrapper.style.display = 'none';
-            listContainer.innerHTML = "";
 
-            // Gather Data
             const payload = {
                 'Level': document.getElementById('level').value,
                 'BodyPart': document.getElementById('bodypart').value,
                 'Type': document.getElementById('type').value,
-                'Equipment': document.getElementById('equipment').value // Sends "" if "Any" is selected
+                'Equipment': document.getElementById('equipment').value
             };
 
             try {
-                // Send to Python
                 const response = await fetch('/predict', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -122,44 +207,10 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Update Count
+                    currentExercises = data.exercises || [];
                     document.getElementById('result-count').innerText = data.count;
                     wrapper.style.display = 'block';
-
-                    // Generate Cards
-                    if (data.exercises && data.exercises.length > 0) {
-                        data.exercises.forEach(ex => {
-                            
-                            // Color code the rating slightly for better UX
-                            let ratingColor = "#28a745"; // Green
-                            if(ex.Rating === "N/A" || ex.Rating === "Unknown") ratingColor = "#6c757d"; // Grey
-
-                            const cardHTML = `
-                                <div class="card" style="margin-bottom: 20px;">
-                                    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
-                                        <div class="meta-title" style="margin:0; font-size:1.2em;">${ex.Title}</div>
-                                        <div style="background:white; color:${ratingColor}; padding:5px 10px; border-radius:5px; font-weight:bold; min-width:60px; text-align:center;">
-                                            ${ex.Rating}
-                                        </div>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="meta-item">
-                                            <span class="label-tag">Equipment:</span>
-                                            <span>${ex.Equipment}</span>
-                                        </div>
-                                        <div class="meta-item">
-                                            <span class="label-tag">Description:</span>
-                                            <span>${ex.Description}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                            listContainer.innerHTML += cardHTML;
-                        });
-                    } else {
-                        listContainer.innerHTML = "<p style='text-align:center; margin-top:20px; color:#777;'>No exercises found. Try changing the filters or selecting 'Any Equipment'.</p>";
-                    }
-
+                    renderList(); // Initial render
                 } else {
                     alert("Error: " + data.error);
                 }
